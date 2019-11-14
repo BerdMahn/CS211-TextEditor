@@ -28,7 +28,7 @@ using namespace std;
 // takes a window, windows y- and x-cursor, the "page" to display (offset of height of window), vector of lines
 void print_vect_page(WINDOW* win, int cursor_y, int cursor_x, int page_num, vector<vector<string>> pages_vect);
 vector<char> push_buff_elements();
-void make_new_page(vector<vector<string>>& current_pages, int &total);
+void make_new_page(vector<vector<string>>& current_pages, int& total);
 void set_overflow(bool& overflow, int num_of_pages);
 string chvect_to_str(vector<char> char_vector);
 void flush_buffer(vector<char>& buffer_vect);
@@ -84,7 +84,7 @@ int main(int argc, char* argv[])
 
 
 	vector<char> buffer = push_buff_elements();			// vector of 25 char spaces, keeps track of current line being typed
-	int buffer_index = 0;	
+	int buffer_index = 0;
 	int lines_index = 0;				// keeps track of position in a line of a page
 	vector<vector<string>> pages;		// a vector of 25 lines, will be added as needed / requested
 	int page_index = 0;					// which page currently being shown
@@ -205,7 +205,7 @@ int main(int argc, char* argv[])
 			}
 
 			string sfile_name(file_name.begin(), file_name.end());		// make file_name vector into string sfile_name
-			open_file = sfile_name;		
+			open_file = sfile_name;
 
 			close_win(temp_window);
 
@@ -283,7 +283,7 @@ int main(int argc, char* argv[])
 		{
 			ofstream outfile;
 			outfile.open(open_file);
-			if (outfile.good() == true)
+			if (outfile.good())
 			{
 				outfile.clear();
 				page_index = 0;
@@ -301,18 +301,59 @@ int main(int argc, char* argv[])
 			}
 			outfile.close();
 
-			/*ofstream BinRepOutfile;
-			ofstream BinMappingOutfile;
-			BinRepOutfile.open(open_file + "BinRep.txt");
-			BinMappingOutfile.open(open_file + "BinMapping.txt");
-			BinRepOutfile.clear();
-			BinMappingOutfile.clear();*/
-
 			unordered_map<string, int> freqMap = getFreq(open_file);
+			priority_queue<pair<string, int>, vector<pair<string, int>>, MaxHeapPairComparer> maxPQ = makeMaxHeap(freqMap);
+			unordered_map<string, string> BinRepUM = getBinRep(maxPQ);
 
-			printUM(freqMap);
+			ifstream infile;
+			string line;
+			vector<string> the_lines;
+			infile.open(open_file);
+			if (infile.good())
+			{
+				while (getline(infile, line))
+					the_lines.push_back(line);
+			}
+			infile.close();
+
+			string curr_word = "";
+			int i = 0;
+			for (auto &str : the_lines)
+			{
+				while (i < str.length())
+				{
+					if ((str[i] == ' ') || (str[i] == '\n'))
+					{
+						int str_len_diff = curr_word.length() - BinRepUM[curr_word].length();
+						str.replace(str.find(curr_word), curr_word.length(), BinRepUM[curr_word]);
+						curr_word = "";
+						i -= str_len_diff;
+						i++;
+					}
+					else
+					{
+						curr_word.push_back(str[i]);
+						i++;
+					}
+				}
+				str.replace(str.find(curr_word), curr_word.length(), BinRepUM[curr_word]);
+			}
+
+			ofstream BinRepOutfile;
+			ofstream BinMappingOutfile;
+			BinRepOutfile.open("BinRep.txt");
+			BinMappingOutfile.open("BinMapping.txt");
+			BinRepOutfile.clear();
+			BinMappingOutfile.clear();
+
+			for (auto line : the_lines)
+				BinRepOutfile << line << endl;
+			for (auto row : BinRepUM)
+				BinMappingOutfile << row.first << ": " << row.second << endl;
+
+			BinRepOutfile.close();
+			BinMappingOutfile.close();
 			break;
-
 		}
 		case ALT_1:		// create new file
 		{
@@ -373,7 +414,7 @@ int main(int argc, char* argv[])
 				c = wgetch(temp_window);
 			}
 
-			string sfile_name(file_name.begin(), file_name.end());		// make file_name vector into string sfile_name
+			string sfile_name(file_name.begin(), file_name.end());		// make file_name vestor into string sfile_name
 			open_file = sfile_name;
 
 			close_win(temp_window);
@@ -546,16 +587,16 @@ int main(int argc, char* argv[])
 			break;
 		}
 		}
-		
+
 
 		if ((user_input != '0') and (user_input != KEY_RIGHT) and (user_input != KEY_LEFT) and
-			(user_input != KEY_UP) and (user_input != KEY_DOWN) and (user_input != KEY_SDOWN) and 
+			(user_input != KEY_UP) and (user_input != KEY_DOWN) and (user_input != KEY_SDOWN) and
 			(user_input != KEY_SUP) and (user_input != KEY_DC) and (user_input != ALT_1) and
-			(user_input != ALT_9) and (user_input != ALT_8)and (user_input != ALT_4))
+			(user_input != ALT_9) and (user_input != ALT_8) and (user_input != ALT_4))
 		{
-			mvwaddch(main_window, main_win_cursy, main_win_cursx++, user_input);	
+			mvwaddch(main_window, main_win_cursy, main_win_cursx++, user_input);
 			update_main_vector(user_input, buffer, buffer_index, pages, page_index, lines_index);
-			wrefresh(main_window);													
+			wrefresh(main_window);
 
 			if (user_input == ' ')
 				latest_typed = "";
@@ -567,7 +608,7 @@ int main(int argc, char* argv[])
 	endwin();
 
 
-	
+
 	return 0;
 }
 
@@ -605,17 +646,17 @@ unordered_map<string, int> getFreq(string file_name)
 	}
 	infile.close();
 
+	freqMap.erase("");
+
 	return freqMap;
 }
 
 priority_queue< pair<string, int>, vector<pair<string, int>>, MaxHeapPairComparer > makeMaxHeap(unordered_map<string, int> UM)
 {
 	priority_queue< pair<string, int>, vector<pair<string, int>>, MaxHeapPairComparer > maxPQ{};
-	int counter = 0;
 	for (auto row : UM)
 	{
-		maxPQ.push(make_pair(row.first, counter));
-		counter++;
+		maxPQ.push(make_pair(row.first, row.second));
 	}
 	return maxPQ;
 }
@@ -653,11 +694,12 @@ here:
 unordered_map<string, string> getBinRep(priority_queue<pair<string, int>, vector<pair<string, int>>, MaxHeapPairComparer> aMaxPQ)
 {
 	unordered_map<string, string> BinRepUM;
-
+	int counter = 0;
 	while (!aMaxPQ.empty())
 	{
-		BinRepUM[aMaxPQ.top().first] = dec_to_bin(aMaxPQ.top().second);
+		BinRepUM[aMaxPQ.top().first] = dec_to_bin(counter);
 		aMaxPQ.pop();
+		counter++;
 	}
 
 	return BinRepUM;
@@ -684,7 +726,7 @@ vector<char> push_buff_elements()
 	return line_vect;
 }
 
-void make_new_page(vector<vector<string>> &current_pages, int &total)
+void make_new_page(vector<vector<string>>& current_pages, int& total)
 {
 	vector<string> new_lines;
 	for (int i = 0; i < 25; i++)
@@ -693,7 +735,7 @@ void make_new_page(vector<vector<string>> &current_pages, int &total)
 	total++;
 }
 
-void set_overflow(bool &overflow, int num_of_pages)
+void set_overflow(bool& overflow, int num_of_pages)
 {
 	if (num_of_pages > 0)
 		overflow = true;
@@ -713,7 +755,7 @@ void flush_buffer(vector<char>& buffer_vect)
 	buffer_vect = push_buff_elements();
 }
 
-void copy_vector(vector<char> &copied_vect, vector<char> &paste_to_vect)
+void copy_vector(vector<char>& copied_vect, vector<char>& paste_to_vect)
 {
 	for (int i = 0; i < copied_vect.size(); i++)
 		paste_to_vect[i] = copied_vect[i];
