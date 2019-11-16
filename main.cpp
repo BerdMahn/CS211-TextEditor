@@ -1,15 +1,3 @@
--#ifdef _WIN32
--//Windows includes
--#include "curses.h"
--#include "panel.h"
--#include "curspriv.h"
--#else
--//Linux / MacOS includes
--#include <curses.h>
--#endif
--#include <string>
--#include <sstream>
-
 #define PDC_DLL_BUILD 1
 #include <cstdlib>
 #include <string>
@@ -19,13 +7,16 @@
 #include <vector>
 #include <stack>
 #include <queue>
+#include "PairComparer.hpp"
+#include "CurrentWordTracker.h"
+#include "InputCheck.h"
+#include "Document.h"
 #include "Trie.h"
 #include "curses.h"
-#include "panel.h"
-#include "PairComparer.hpp"
+
 using namespace std;
 
-// takes a window, windows y- and x-cursor, the "page" to display (offset of height of window), vector of lines
+//takes a window, windows y- and x-cursor, the "page" to display (offset of height of window), vector of lines
 void print_vect_page(WINDOW* win, int cursor_y, int cursor_x, int page_num, vector<vector<string>> pages_vect);
 vector<char> push_buff_elements();
 void make_new_page(vector<vector<string>>& current_pages, int& total);
@@ -45,51 +36,122 @@ unordered_map<string, string> getBinRep(priority_queue<pair<string, int>, vector
 template<class T, class K>
 void printUM(unordered_map<T, K> UM);
 
+class Buffer
+{
+public:
+	char* getBuffer()
+	{
+		return buffer;
+	}
+	void stepForward()
+	{
+		if (buffer_index == 118)
+			cout << "BUFFER ERROR: Cannot step forward. End of buffer." << endl;
+		if (buffer_index > 118)
+			cout << "BUFFER ERROR: Cannot step forward. Buffer index > 118." << endl;
+		else
+			buffer_index++;
+	}
+	void stepBackward()
+	{
+		if (buffer_index == 0)
+			cout << "BUFFER ERROR: Cannot step backward. Beginning of buffer." << endl;
+		if (buffer_index < 0)
+			cout << "BUFFER ERROR: Cannot step backward. Buffer index < 0." << endl;
+		else
+			buffer_index--;
+	}
+	void stepForApp(int buffer_index, char char_to_set)
+	{
+		if (buffer_index == 118)
+			cout << "BUFFER ERROR: Cannot step forward. End of buffer." << endl;
+		if (buffer_index > 118)
+			cout << "BUFFER ERROR: Cannot step forward. Buffer index > 118." << endl;
+		else
+			buffer_index++;
+
+		if (buffer_index < 0 || buffer_index >= 118)
+			cout << "BUFFER ERROR: Cannot append, buffer_index out of range (0 > buffer_index >= 118)" << endl;
+		else
+			buffer[buffer_index] = char_to_set;
+	}
+	void stepBackApp(int buffer_index, char char_to_set)
+	{
+		if (buffer_index == 0)
+			cout << "BUFFER ERROR: Cannot step backward. Beginning of buffer." << endl;
+		if (buffer_index < 0)
+			cout << "BUFFER ERROR: Cannot step backward. Buffer index < 0." << endl;
+		else
+			buffer_index--;
+
+		if (buffer_index < 0 || buffer_index >= 118)
+			cout << "BUFFER ERROR: Cannot append, buffer_index out of range (0 > buffer_index >= 118)" << endl;
+		else
+			buffer[buffer_index] = char_to_set;
+	}
+	void appendBuffer(int buffer_index, char char_to_set)
+	{
+		if (buffer_index < 0 || buffer_index >= 118)
+			cout << "BUFFER ERROR: Cannot append, buffer_index out of range (0 > buffer_index >= 118)" << endl;
+		else
+			buffer[buffer_index] = char_to_set;
+	}
+private:
+	char buffer[118];
+	int buffer_index = 0;
+};
+
 int main(int argc, char* argv[])
 {
-	Trie kywds_trie;
-	populate_trie(kywds_trie);	// populate from "keywords.txt"
+	Trie keywords_trie;
+	populate_trie(keywords_trie);
 
 	initscr();
 	start_color();
 	noecho();
 	keypad(stdscr, TRUE);
 
-	// create the main interactive window
 	WINDOW* main_window = newwin(LINES - 3, COLS, 0, 0);
 	keypad(main_window, TRUE);
 	box(main_window, '|', '-');
 	wrefresh(main_window);
+	
+	/*==== object declarations ====
+	CurrentWordTracker WordTracker(main_window);
+	InputCheck InputCheck(main_window);
+	PageViewer PgViewer;
+	PgViewer.setDisplayWin(main_window);
+	Document Doc(PgViewer);
+	/*==============================*/
+	string latest_typed = "";
+	
 	int main_win_cursx = 1;
 	int main_win_cursy = 1;
 	wmove(main_window, main_win_cursy, main_win_cursx);
+	
 	int main_win_height;
 	int main_win_width;
 	getmaxyx(main_window, main_win_height, main_win_width);
 	main_win_height -= 2;
 
-	// create options bar window
 	const int NUM_OF_OPTS = 5;
+	string options[NUM_OF_OPTS] = { "File", "Edit", "View", "Insert", "p" };
 	WINDOW* option_bar_windows[NUM_OF_OPTS];
-	string options[NUM_OF_OPTS] = { "File", "Edit", "View", "Insert", "Help" };
 	for (int i = 0; i < NUM_OF_OPTS; i++)
 	{
 		option_bar_windows[i] = newwin(3, 10, LINES - 3, (10 * i));
 		keypad(option_bar_windows[i], TRUE);
 		box(option_bar_windows[i], '|', '-');
-
 		mvwprintw(option_bar_windows[i], 1, 2, options[i].c_str());
 		wrefresh(option_bar_windows[i]);
 	}
-
 
 	vector<char> buffer = push_buff_elements();			// vector of 25 char spaces, keeps track of current line being typed
 	int buffer_index = 0;
 	int lines_index = 0;				// keeps track of position in a line of a page
 	vector<vector<string>> pages;		// a vector of 25 lines, will be added as needed / requested
 	int page_index = 0;					// which page currently being shown
-	int total_num_pages = 0;
-	string latest_typed;				// keeps track of the current word being typed
+	int total_num_pages = 0;				
 
 	make_new_page(pages, total_num_pages);
 
@@ -315,11 +377,11 @@ int main(int argc, char* argv[])
 					the_lines.push_back(line);
 			}
 			infile.close();
-
+			
 			string curr_word = "";
-			int i = 0;
-			for (auto &str : the_lines)
+			for (auto& str : the_lines)
 			{
+				int i = 0;
 				while (i < str.length())
 				{
 					if ((str[i] == ' ') || (str[i] == '\n'))
@@ -422,7 +484,9 @@ int main(int argc, char* argv[])
 		}
 		case KEY_DC:	// delete character
 		{
+			//WordTracker.clear();
 			latest_typed = "";
+
 			if (main_win_cursx > 1)
 			{
 				mvwdelch(main_window, main_win_cursy, --main_win_cursx);
@@ -437,6 +501,7 @@ int main(int argc, char* argv[])
 		}
 		case KEY_RIGHT:
 		{
+			//WordTracker.clear();
 			latest_typed = "";
 			// moves cursor right if it's not already all the way to the right of the window
 			if (main_win_cursx < COLS - 2)
@@ -449,6 +514,7 @@ int main(int argc, char* argv[])
 		}
 		case KEY_LEFT:
 		{
+			//WordTracker.clear();
 			latest_typed = "";
 			// moves cursor left if it's not already all the way to the left
 			if (main_win_cursx > 1)
@@ -461,6 +527,7 @@ int main(int argc, char* argv[])
 		}
 		case KEY_DOWN:
 		{
+			//WordTracker.clear();
 			latest_typed = "";
 			// moves cursor down if it's not already all the way at the bottom, else if it is and overflow is true, then scroll
 			if (main_win_cursy < main_win_height)
@@ -500,6 +567,7 @@ int main(int argc, char* argv[])
 		}
 		case KEY_UP:
 		{
+			//WordTracker.clear();
 			latest_typed = "";
 			// moves cursor up if it's not already all the way at the top
 			if (main_win_cursy > 1)
@@ -551,7 +619,7 @@ int main(int argc, char* argv[])
 			bool keepGoing = true;
 			while (keepGoing)
 			{
-				pair<vector<string>, int> selected_option = show_word_suggestions(sugg_win, suggestions_win_height, kywds_trie, latest_typed, sugg_win_cursy - 1);
+				pair<vector<string>, int> selected_option = show_word_suggestions(sugg_win, suggestions_win_height, keywords_trie, latest_typed/*WordTracker.getCurrentWord()*/, sugg_win_cursy - 1);
 				int c = mvwgetch(sugg_win, sugg_win_cursy, sugg_win_cursx);
 
 				if (c == ALT_4)
@@ -574,7 +642,7 @@ int main(int argc, char* argv[])
 					close_win(sugg_win);
 					string chosen_word = selected_option.first[selected_option.second];
 
-					for (int i = latest_typed.size(); i < chosen_word.size(); i++)
+					for (int i = latest_typed.length()/*WordTracker.wordLength()*/; i < chosen_word.size(); i++)
 					{
 						mvwaddch(main_window, main_win_cursy, main_win_cursx++, chosen_word[i]);
 						update_main_vector(chosen_word[i], buffer, buffer_index, pages, page_index, lines_index);
@@ -589,26 +657,21 @@ int main(int argc, char* argv[])
 		}
 
 
-		if ((user_input != '0') and (user_input != KEY_RIGHT) and (user_input != KEY_LEFT) and
-			(user_input != KEY_UP) and (user_input != KEY_DOWN) and (user_input != KEY_SDOWN) and
-			(user_input != KEY_SUP) and (user_input != KEY_DC) and (user_input != ALT_1) and
-			(user_input != ALT_9) and (user_input != ALT_8) and (user_input != ALT_4))
+		if (InputCheck.isSpecialKey(user_input) == false)
 		{
 			mvwaddch(main_window, main_win_cursy, main_win_cursx++, user_input);
 			update_main_vector(user_input, buffer, buffer_index, pages, page_index, lines_index);
 			wrefresh(main_window);
 
-			if (user_input == ' ')
+			if (InputCheck.isSpace(user_input))
+				//WordTracker.clear();
 				latest_typed = "";
 			else
-				latest_typed.push_back(user_input);
+				//WordTracker.appendChar(user_input);
+				latest_typed += user_input;
 		}
 	}
-
 	endwin();
-
-
-
 	return 0;
 }
 
@@ -655,40 +718,8 @@ priority_queue< pair<string, int>, vector<pair<string, int>>, MaxHeapPairCompare
 {
 	priority_queue< pair<string, int>, vector<pair<string, int>>, MaxHeapPairComparer > maxPQ{};
 	for (auto row : UM)
-	{
 		maxPQ.push(make_pair(row.first, row.second));
-	}
 	return maxPQ;
-}
-
-string dec_to_bin(int convert_num)
-{
-	stack<char> binary_stack;
-	if (convert_num == 0)
-	{
-		binary_stack.push('0');
-		goto here;
-	}
-
-	while (convert_num > 0)
-	{
-		if ((convert_num & 1) == 1)
-			binary_stack.push('1');
-		else
-			binary_stack.push('0');
-
-		convert_num = convert_num >> 1;
-	}
-
-here:
-	string final_bitstr;
-	while (!binary_stack.empty())
-	{
-		final_bitstr.push_back(binary_stack.top());
-		binary_stack.pop();
-	}
-
-	return final_bitstr;
 }
 
 unordered_map<string, string> getBinRep(priority_queue<pair<string, int>, vector<pair<string, int>>, MaxHeapPairComparer> aMaxPQ)
@@ -701,8 +732,32 @@ unordered_map<string, string> getBinRep(priority_queue<pair<string, int>, vector
 		aMaxPQ.pop();
 		counter++;
 	}
-
 	return BinRepUM;
+}
+
+string dec_to_bin(int convert_num)
+{
+	stack<char> binary_stack;
+	if (convert_num == 0)
+		binary_stack.push('0');
+	else
+	{
+		while (convert_num > 0)
+		{
+			if ((convert_num & 1) == 1)
+				binary_stack.push('1');
+			else
+				binary_stack.push('0');
+			convert_num = convert_num >> 1;
+		}
+	}
+	string final_bitstr;
+	while (!binary_stack.empty())
+	{
+		final_bitstr.push_back(binary_stack.top());
+		binary_stack.pop();
+	}
+	return final_bitstr;
 }
 
 void update_main_vector(char update_input, vector<char>& buffer, int& buffer_index, vector<vector<string>>& main_pages, int page_index, int lines_index)
